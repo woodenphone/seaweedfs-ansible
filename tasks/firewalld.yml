@@ -1,0 +1,123 @@
+## firewalld.yml
+## Firewall config for seaweedfs ports
+---
+- name: 'Open ports for seaweedfs'
+  vars:
+    RFC1918_ranges: ## (RFC 1918 IPv4 addresses) (LAN address space).
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+  block:
+## ==========< Master(s) >========== ##
+    - name: 'master seaweedfs_master.service'
+      ansible.posix.firewalld:
+        port: 9333/tcp ## Default seaweedfs master port is 9333.
+        permanent: true
+        state: enabled
+
+    - name: 'master RPC seaweedfs_master.service'
+      ansible.posix.firewalld:
+        port: 19333/tcp ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+## ==========< /Master(s) >========== ##
+
+## ==========< Filers(s) >========== ##
+    - name: 'readwrite seaweedfs_filer.service'
+      ansible.posix.firewalld:
+        port: "8888/tcp" ## Default seaweedfs filer port is 8888.
+        permanent: true
+        state: enabled
+
+    - name: 'readwrite RPC seaweedfs_filer.service'
+      ansible.posix.firewalld:
+        port: "18888/tcp" ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+
+    - name: 'readonly seaweedfs_filer.service'
+      ansible.posix.firewalld:
+        port: "49301/tcp"
+        permanent: true
+        state: enabled
+
+    - name: 'readonly RPC seaweedfs_filer.service'
+      ansible.posix.firewalld:
+        port: "59301/tcp" ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+## ==========< /Filers(s) >========== ##
+
+## ==========< Volumeserver(s) >========== ##
+    - name: 'normal seaweedfs_volume_foo.service'
+      ansible.posix.firewalld:
+        port: "49501/tcp" ## Volumeserver can be given any spare port.
+        permanent: true
+        state: enabled
+
+    - name: 'RPC seaweedfs_volume_foo.service'
+      ansible.posix.firewalld:
+        port: "59501/tcp" ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+
+    - name: 'normal seaweedfs_volume_bar.service'
+      ansible.posix.firewalld:
+        port: "49502/tcp" ## Volumeserver can be given any spare port.
+        permanent: true
+        state: enabled
+
+    - name: 'RPC seaweedfs_volume_bar.service'
+      ansible.posix.firewalld:
+        port: "59502/tcp" ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+
+    - name: 'normal seaweedfs_volume_baz.service'
+      ansible.posix.firewalld:
+        port: "49503/tcp" ## Volumeservers can be given any spare port.
+        permanent: true
+        state: enabled
+
+    - name: 'RPC seaweedfs_volume_baz.service'
+      ansible.posix.firewalld:
+        port: "59503/tcp" ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+
+    - name: 'normal seaweedfs_volume_fizz.service'
+      ansible.posix.firewalld:
+        port: "49504/tcp" ## Volumeservers can be given any spare port.
+        permanent: true
+        state: enabled
+
+    - name: 'RPC seaweedfs_volume_fizz.service'
+      ansible.posix.firewalld:
+        port: "59504/tcp" ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+
+    - name: 'normal seaweedfs_volume_buzz.service'
+      ansible.posix.firewalld:
+        port: "49505/tcp" ## Volumeserver can be given any spare port.
+        permanent: true
+        state: enabled
+
+    - name: 'RPC seaweedfs_volume_buzz.service'
+      ansible.posix.firewalld:
+        port: "59505/tcp" ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+
+    - name: 'normal seaweedfs_volume_bing.service'
+      ansible.posix.firewalld:
+        port: "49506/tcp" ## Volumeservers can be given any spare port.
+        permanent: true
+        state: enabled
+
+    - name: 'RPC seaweedfs_volume_bing.service'
+      ansible.posix.firewalld:
+        port: "59506/tcp" ## GRPC ports are port_num+10000
+        permanent: true
+        state: enabled
+## ==========< /Volumeserver(s) >========== ##

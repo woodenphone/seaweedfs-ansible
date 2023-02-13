@@ -1,0 +1,51 @@
+## tasks/clone-seaweedfs-repo.yml
+## Clone the repo ONLY if not recently polled.
+## Author: Ctrl-S
+---
+- name: "Prep dir(s)"
+  ansible.builtin.file:
+    state: 'directory'
+    owner: "{{ user }}"
+    group: "{{ group }}"
+    mode: 'u=rwx,g=rx,o=rx'
+    path: "{{ weed_install_work_dir }}"
+
+## Determining time of last git clone/fetch/pull
+## SEE: https://stackoverflow.com/questions/21170707/git-check-when-the-last-fetch-was-run
+## $ git reflog show --date=iso -n 1 origin/master
+## $ git reflog show --date=unix -n 1 origin/master
+## Alternatively, could check date changed of important internal git files:
+## $ stat .git/HEAD
+## Get the modification time of the most recently modified item of the .git dir in epoch-style timestamp format:
+## $ ls -lAt --time-style=+%s .git/
+## $ ls -lAt --time-style=+@%s .git/ | head -n2 | tail -n1 | cut -d' ' -f7
+## https://docs.ansible.com/ansible/latest/user_guide/playbooks_filters.html
+
+- name: 'Check when local repo was last changed'
+  ansible.builtin.shell:
+    cmd: ls -lAt --time-style=+@%s .git/ | head -n2 | tail -n1 | cut -d' ' -f7
+  register: local_repo_changed
+
+- name: "Clone repo from github"
+  ansible.builtin.git:
+    repo: "https://github.com/chrislusf/seaweedfs.git"
+    dest: "{{ weed_install_work_dir }}/repo.chrislusf.seaweedfs"
+    update: true
+    force: true
+    track_submodules: true
+  when:
+    ## Older than n days:
+    - ((local_repo_changed.stdout  | to_datetime) - (ansible_date_time.epoch  | to_datetime)).days > 2
+    ## Only interact with github when actually running:
+    - ansible_check_mode == False
+  register: git_result
+
+- name: 'Record date polled using marker file'
+  ansible.builtin.file:
+    path: "{{ weed_install_work_dir }}/repo.chrislusf.seaweedfs/.git/.ANSIBLE_MARKER_POLLED_ORIGIN_AT_TIMESTAMP"
+    state: touch
+  when:
+    ## Only make marker if git action worked (i.e. not 403 or 404):
+    - git_result.after
+    ## Don't make marker file during testing:
+    - ansible_check_mode == False

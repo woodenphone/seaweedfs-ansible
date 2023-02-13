@@ -1,0 +1,50 @@
+## tasks/log-cleanup-cronjob.yml
+## Setup automated backup of the seaweedfs filer.
+## Author: Ctrl-S
+## [Fedora]
+---
+- name: 'Install: cronjob - log cleanup'
+  when: uninstall is not defined
+  block:
+  - name: 'Directory for scripts to be stored'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=rX,o=rX' # 'X' = Set dirs listable.
+      path: "{{ general_dir }}/scripts/"
+
+  - name: 'Template log cleanup script'
+    ansible.builtin.template:
+      src: "templates/log-cleanup.cronjob.sh.j2"
+      dest: "{{ general_dir }}/scripts/log-cleanup.cronjob.sh"
+      mode: "u=rwx,g=rx,o=r"
+      owner: "root" ## Runs as root, so owned by root.
+      group: "root" ## Runs as root, so owned by root.
+      backup: true
+
+  - name: 'Cronjob to run log cleanup script'
+    ansible.builtin.cron:
+      state: present
+      name: 'seaweedfs log cleanup'
+      cron_file: 'weed-log-cleanup'
+      user: "root"
+      special_time: "{{ log_cleanup_cronjob_special_time }}"
+      job: "{{ general_dir }}/scripts/log-cleanup.cronjob.sh"
+
+
+- name: 'Uninstall: cronjob - log cleanup'
+  when: uninstall is defined and uninstall
+  ## Allow both install and uninstall from same script.
+  ## https://dev.to/admantium/ansible-idempotent-playbooks-4e67
+  block:
+  - name: 'Script absent'
+    ansible.builtin.file:
+      state: absent
+      path: "{{ general_dir }}/scripts/log-cleanup.cronjob.sh"
+
+  - name: 'Cronjob absent'
+    ansible.builtin.cron:
+      state: absent
+      name: 'seaweedfs log cleanup'
+      cron_file: 'weed-log-cleanup'

@@ -1,0 +1,798 @@
+#!ansible-playbook -vv
+## main.pb.yml
+## Seaweedfs setup for EXAMPLE
+## Author: Ctrl-S
+---
+- name: 'Example seaweedfs installation'
+  hosts: 'localhost'
+  become: true
+  vars_files:
+    - 'vars/vars.yml'
+  vars:
+    volume_locations:
+      ## The locations each volume server's storage will be on; should all be different physical drives:
+      ## (Used to ensure volume storage paths are setup to exist with correct permissions.)
+      - '/media/DISK_ONE/seaweedfs_volume'
+      - '/media/DISK_TWO/seaweedfs_volume'
+      - '/media/DISK_THREE/seaweedfs_volume'
+      # - '/media/SERIAL/seaweedfs_volume'
+    service_names: ## Names of systemd units (Used to control services)
+      - "seaweedfs_master_1"
+      - "seaweedfs_filer_1"
+      - "seaweedfs_filer_2"
+      - "seaweedfs_filer_3"
+      - "seaweedfs_s3api_1"
+      - "seaweedfs_mount_filerroot"
+      - 'seaweedfs_mount_asagi'
+      - "seaweedfs_volume_DISK_ONE"
+      - "seaweedfs_volume_DISK_TWO"
+      - "seaweedfs_volume_DISK_THREE" # CHECKME, truncated serial?
+  pre_tasks: # (Run sequentially before roles.)
+
+  - name: 'Upgrade-time precautions'
+    tags: precautions
+    block:
+      - name: 'Filer backup dir exists'
+        ansible.builtin.file:
+          state: 'directory'
+          owner: "{{ user }}"
+          group: "{{ group }}"
+          mode: 'u=rwX,g=rX,o=' # 'X' = Set dirs listable.
+          path: "{{ onupgrade_bkup_dir }}"
+        tags: precautions
+
+      - name: 'Filer backed up; before anything is changed'
+        ansible.builtin.shell:
+          cmd: >
+            echo "fs.meta.save -o {{ onupgrade_bkup_dir }}/upgrade.@{{ ansible_facts.date_time.epoch }}.filermeta"
+            | weed shell
+            -master={{ filer_backup_master | quote }}
+            -filer={{ filer_backup_filer | quote }}
+        become: true
+        become_user: "{{ user }}"
+        tags: precautions
+
+  - name: '[Fedora] packages'
+    ansible.builtin.dnf:
+      state: present
+      name:
+        ## https://unix.stackexchange.com/questions/568273/crontab-command-missing-in-fedora-31
+        ## For cronjobs:
+        - cronie
+        - cronie-anacron
+        ## Log rotation
+        - logrotate
+        ## Required for FUSE mount ($ weed mount):
+        - fuse
+        - fuse-common
+        ## For s3 interaction:
+        - 's3cmd' ## https://pkgs.org/download/s3cmd
+        ## Used for offsite filermeta backup.
+        - 'rclone'
+        - 'rsync'
+    when: ansible_facts['os_family'] == 'RedHat'
+
+  - name: '[Debian] packages'
+    ansible.builtin.apt:
+      state: present
+      name:
+        ## Required for FUSE mount ($ weed mount)
+        - fuse3
+        ## For s3 interaction:
+        - 's3cmd' ## https://pkgs.org/download/s3cmd
+        ## Used for offsite filermeta backup.
+        - 'rclone'
+        - 'rsync'
+    when: ansible_facts['os_family'] == 'Debian'
+
+  # - name: 'System users'
+  #   ansible.builtin.include_tasks:
+  #     file:
+  #       - 'tasks/user-atc.yml'
+  #       - 'tasks/user-ctrls.yml'
+
+  - name: 'User & group for seaweedfs'
+    ansible.builtin.include_tasks:
+      file: 'tasks/users.yml'
+
+  # - name: 'Cleanup previous version clutter'
+  #   ansible.builtin.include_tasks:
+  #     file: 'tasks/upgrade-cleanup.yml'
+  #   tags: upgrade
+
+  - name: 'Seaweedfs config dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=rX,o=' # Weed group needs read to use weed CLI utils.
+      path: "{{ item }}"
+    with_items:
+      - "{{ weed_conf_dir }}"
+
+  - name: 'Seaweedfs misc dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rX,g=rX,o=rX' # 'X' = Set dirs listable.
+      path: "{{ item }}"
+    with_items:
+      - "{{ general_dir }}"
+      - "{{ general_dir }}/scripts"
+
+  - name: 'Seaweedfs FUSE mountpoint parent dir exists'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=rwX,o=rX' # 'X' = Set dirs listable.
+      path: "{{ item }}"
+    with_items:
+      - "/weedmnt/" ## FUSE Mountpoints parent dir
+
+  - name: 'Seaweedfs FUSE mountpoint dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=rwX,o=rX' # 'X' = Set dirs listable.
+      path: "{{ item }}"
+    with_items:
+      - "/weedmnt/asagi" ## Asasgi 4ch scraper.
+      - "/weedmnt/filer-root" ## Root-level of filer.
+
+  - name: 'Seaweedfs filer dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=rwX,o=' ## Only seaweedfs itself ever accesses these.
+      path: "{{ item }}"
+    with_items:
+      - "{{ general_dir }}/filer_1"
+      - "{{ general_dir }}/filer_1/leveldb2"
+      - "{{ general_dir }}/filer_2"
+      - "{{ general_dir }}/filer_3"
+
+  - name: 'Seaweedfs log dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=rX,o=rX' # Modified by root and seaweedfs only.
+      path: "{{ item }}"
+    with_items:
+      - "{{ logdir }}"
+      - "{{ logdir }}/master_1"
+      - "{{ logdir }}/filer_1"
+      - "{{ logdir }}/filer_2"
+      - "{{ logdir }}/filer_3"
+      - "{{ logdir }}/s3api_1"
+      - "{{ logdir }}/mount_filerroot"
+      - "{{ logdir }}/mount_asagi"
+      - "{{ logdir }}/volume_DISK_ONE"
+      - "{{ logdir }}/volume_DISK_TWO"
+      - "{{ logdir }}/volume_DISK_THREE"
+
+  - name: 'Seaweedfs volume dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=,o=' ## Only seaweedfs itself ever accesses these.
+      path: "{{ item }}"
+    with_items: "{{ volume_locations }}"
+
+  - name: 'Install seaweedfs'
+    ansible.builtin.include_tasks:
+      file: 'tasks/install_seaweedfs_bin.yml'
+    tags: download
+
+  - name: 'Install certstrap'
+    ansible.builtin.include_tasks:
+      file: 'tasks/install_certstrap_bin.yml'
+    tags: download
+
+  - name: 'Generate help docs for weed and certstrap (informational use only)'
+    ansible.builtin.include_tasks:
+      file: 'tasks/mkhelp.yml'
+    tags: download
+
+  - name: 'Copy over systemd limits override config file'
+    ## systemd limits override (Memory, ect. usage maximums)
+    ansible.builtin.copy:
+      src: "files/etc-security-limits.d-seaweedfs.conf"
+      dest: "/etc/security/limits.d/seaweedfs.conf"
+      mode: "u=r,g=r,o=r" # Only modified by root.
+      owner: "root"
+      group: "root"
+      backup: true
+
+  - name: 'Copy over FUSE config file, to allow non-root FUSE mounts'
+    ansible.builtin.copy:
+      src: "files/etc-fuse.conf"
+      dest: "/etc/fuse.conf"
+      mode: "u=rw,g=r,o=r" # Only modified by root.
+      owner: "root"
+      group: "root"
+      backup: true
+
+  - name: 'Install helper / utility scripts'
+    ansible.builtin.copy:
+      src: "{{ item }}"
+      dest: "{{ general_dir }}/scripts"
+      mode: "u=rX,g=rX,o=rX" # Only modified by root/sudoers.
+      owner: "{{ user }}"
+      group: "{{ group }}"
+    with_items:
+      - 'scripts/weed_volume_list_human.sh'
+      - 'scripts/weed_volume_list_human_many_vals.py'
+      - "scripts/recuse_listable_permission.sh"
+      - "scripts/fs-meta-save.sh"
+      - "scripts/mk-weed-help-msgs.sh"
+      - "scripts/mk-certstrap-help-msgs.sh"
+    ignore_errors: "{{ ansible_check_mode }}" ## Dir might not exist when testing.
+
+  - name: 'Fix permissions of weed volume dir paths'
+    ## Weed can misbehave is it cannot list the path to a volume
+    ansible.builtin.shell:
+      cmd: >
+        {{ general_dir | quote }}/scripts/recuse_listable_permission.sh
+        {{ item | quote }}
+    with_items: "{{ volume_locations }}"
+
+  - name: 'master.toml present'
+    ansible.builtin.copy:
+      src: "files/master.toml"
+      dest: "{{ weed_conf_dir }}/master.toml"
+      mode: "u=r,g=r,o=" # Only modified by root/sudoers.
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      backup: true
+
+  - name: 'filer.toml present'
+    ansible.builtin.copy:
+      src: "files/filer.toml"
+      dest: "{{ weed_conf_dir }}/filer.toml"
+      mode: "u=r,g=r,o=" # Secret; weed group needs read perms to use weed tools.
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      backup: true
+
+  - name: 's3_conf.json present'
+    ## SeaweedFS S3 API config JSON
+    ansible.builtin.copy:
+      src: "files/s3_conf.json"
+      dest: "{{ weed_conf_dir }}/s3_conf.json"
+      mode: "u=r,g=r,o=" # Contains secrets. Only modified by root/sudoers.
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      backup: true
+
+  # - name: 'security.toml present'
+  #   ansible.builtin.include_tasks:
+  #     file: 'tasks/copy-absent.yml' # Workaround to prevent clobbering.
+  #   vars:
+  #     src: "files/security.toml"
+  #     dest: "{{ weed_conf_dir }}/security.toml"
+  #     mode: "u=r,g=r,o=" # Secret; weed group needs read perms to use weed tools.
+  #     owner: "{{ user }}"
+  #     group: "{{ group }}"
+  #     backup: true
+
+  # - name: 'Certificates present'
+  #   ansible.builtin.copy:
+  #     src: "files/certs/{{ item }}"
+  #     dest: "{{ weed_conf_dir }}/{{ item }}"
+  #     mode: "u=r,g=r,o=" # Secret; weed group needs read perms to use weed tools.
+  #     owner: "{{ user }}"
+  #     group: "{{ group }}"
+  #     backup: true
+  #   with_items:
+  #     - 'SeaweedFS_CA.crt'
+  #     - 'volume.crt'
+  #     - 'volume.key'
+  #     - 'master.crt'
+  #     - 'master.key'
+  #     - 'filer.crt'
+  #     - 'filer.key'
+  #     - 'client.crt'
+  #     - 'client.key'
+  #   tags: security
+
+  # - name: 'Cronjob: postgres backup'
+  #   ansible.builtin.include_tasks:
+  #     file: 'tasks/pgsql-backup.yml'
+
+  - name: 'Cronjob: automated backup for seaweedfs_filer_1'
+    ansible.builtin.include_tasks:
+      file: 'tasks/filer-meta-bkup-multidest.yml'
+
+  - name: 'Cronjob: automated removal of old logs'
+    ansible.builtin.include_tasks:
+      file: 'tasks/log-cleanup-cronjob.yml'
+
+  - name: 'Logrotate conf file'
+    ansible.builtin.include_tasks:
+      file: 'tasks/logrotate.yml'
+
+  - name: 'Firewalld configured to open seaweedfs ports (dangerous)'
+    ansible.builtin.include_tasks:
+      file: 'tasks/firewalld.yml'
+    tags: firewall
+
+
+  roles:
+    - name: 'Systemd units for seaweedfs'
+      role: "0x0i.systemd"
+      ## https://github.com/0x0I/ansible-role-systemd
+      ## $ ansible-galaxy install 0x0i.systemd
+      ## https://github.com/0x0I/ansible-role-systemd/blob/master/templates/systemd.unit.j2
+      ## https://man7.org/linux/man-pages/man5/systemd.service.5.html
+      ## https://man7.org/linux/man-pages/man5/systemd.exec.5.html
+      ## https://man7.org/linux/man-pages/man7/environ.7.html
+      ignore_errors: "{{ ansible_check_mode }}"
+      tags: units
+      vars:
+        unit_config:
+  ## Meta-unit for group control
+          - name: 'seaweedfs'
+            ## Meta-unit for group control
+            ## See: https://unix.stackexchange.com/questions/561021/ how-to-make-multiple-systemd-services-start-stop-as-a-group#561048
+            ## This service is purely to let the administrator control seaweedfs as a group.
+            ## Use as: $ systemctl COMMAND seaweedfs
+            ## Basically equivalent to: $ systemctl COMMAND 'seaweedfs_*.service'
+            ## This unit should have 'Wants: "foo.service bar.service baz.service"' pointing at the other services.
+            ## Other units should have 'PartOf: seaweedfs.service' pointing back at this one.
+            ## path: /etc/systemd/system/seaweedfs.service
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "control seaweedfs services together."
+              ## Put references to all weed services in wants.
+              Wants: >-
+                seaweedfs_master_1.service
+                seaweedfs_filer_1.service
+                seaweedfs_filer_2.service
+                seaweedfs_filer_3.service
+                seaweedfs_s3api_1.service
+                seaweedfs_mount_filerroot.service
+                seaweedfs_mount_asagi.service
+                seaweedfs_volume_DISK_ONE.service
+                seaweedfs_volume_DISK_TWO.service
+                seaweedfs_volume_DISK_THREE.service
+            Service:
+              Type: simple
+              ExecStart: 'echo dummy'
+            Install:
+              WantedBy: multi-user.target
+## Master(s)
+          - name: 'seaweedfs_master_1'
+            ## path: /etc/systemd/system/seaweedfs_master_1.service
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "Seaweedfs master"
+              PartOf: "seaweedfs.service"
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/master_1
+                master
+                -ip={{ bind_ip }}
+                -ip.bind={{ bind_ip }}
+                -port=9333
+                -defaultReplication=001
+                -volumeSizeLimitMB=30000
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+## Filer(s)
+          - name: 'seaweedfs_filer_1'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "Seaweedfs filer (leveldb2)"
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service
+              After: seaweedfs_master_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              Environment: >-
+                "WEED_LEVELDB2_ENABLED=true"
+                "WEED_LEVELDB2_DIR={{ general_dir }}/filer_1/leveldb2/"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/filer_1
+                filer
+                -ip={{ bind_ip }}
+                -ip.bind={{ bind_ip }}
+                -master={{ master_addresses }}
+                -port=8888
+                -port.grpc=18888
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+##
+          - name: 'seaweedfs_filer_2'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "Seaweedfs filer 2 (sqlite)"
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service seaweedfs_filer_1.service
+              After: seaweedfs_master_1.service seaweedfs_filer_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              Environment: >-
+                "WEED_SQLITE_ENABLED=true"
+                "WEED_SQLITE_DBFILE={{ general_dir }}/filer_2/filer.db"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -logdir={{ logdir }}/filer_2
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                filer
+                -ip={{ bind_ip }}
+                -ip.bind={{ bind_ip }}
+                -master={{ master_addresses }}
+                -port=8889
+                -port.grpc=18889
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+##
+          - name: 'seaweedfs_filer_3'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "Seaweedfs filer 3 (postgres)"
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service seaweedfs_filer_1.service
+              After: seaweedfs_master_1.service seaweedfs_filer_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              Environment: >-
+                "WEED_POSTGRES_ENABLED=true"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/filer_3
+                filer
+                -ip={{ bind_ip }}
+                -ip.bind={{ bind_ip }}
+                -master={{ master_addresses }}
+                -port=8890
+                -port.grpc=18890
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+###
+### S3 API host(s)
+          - name: 'seaweedfs_s3api_1'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "SeaweedFS S3 API host"
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service
+              After: seaweedfs_master_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/s3api_1
+                s3
+                -ip.bind={{ bind_ip }}
+                -filer={{ filer_address }}
+                -config={{ weed_conf_dir }}/s3_conf.json
+                --port=8333
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+##
+### FUSE mounts
+          - name: 'seaweedfs_mount_filerroot'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "SeaweedFS FUSE mount - filer root."
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service
+              After: seaweedfs_master_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "root" # FUSE-mount needs elevated privileges.
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/mount_filerroot
+                mount
+                -filer=127.0.0.1:8888
+                -replication=001
+                -allowOthers=true
+                -dir="/weedmnt/filer-root"
+                -dirAutoCreate=true
+                -filer.path=/
+                -cacheCapacityMB=0
+                -cpuprofile=/tmp/seaweedfs_mount_filerroot.cpu.pprof
+                -memprofile=/tmp/seaweedfs_mount_filerroot.mem.pprof
+              ExecStopPost: "umount -vl /weedmnt/filer-root"
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+##
+          - name: 'seaweedfs_mount_asagi'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "SeaweedFS FUSE mount - /buckets/asagi"
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service
+              After: seaweedfs_master_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "root" # FUSE-mount needs elevated privileges.
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/mount_asagi
+                mount
+                -filer=127.0.0.1:8888
+                -replication=001
+                -allowOthers=true
+                -dir="/weedmnt/asagi"
+                -filer.path=/buckets/asagi
+                -dirAutoCreate=true
+                -cacheCapacityMB=0
+                -cpuprofile=/tmp/seaweedfs_mount_asagi.cpu.pprof
+                -memprofile=/tmp/seaweedfs_mount_asagi.mem.pprof
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+##
+### Volume(s)
+          - name: 'seaweedfs_volume_DISK_ONE'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "SeaweedFS volume server (disk: SERIALNUM_HERE)."
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service
+              After: seaweedfs_master_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/volume_DISK_ONE
+                volume
+                -port=49500
+                -port.grpc=59500
+                -dataCenter={{ datacenter }}
+                -rack={{ rack }}
+                -disk=hdd
+                -max=0
+                -minFreeSpacePercent=5
+                -dir=/media/DISK_ONE/seaweedfs_volume
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+##
+          - name: 'seaweedfs_volume_DISK_TWO'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "SeaweedFS volume server (disk: SERIALNUM_HERE)."
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service
+              After: seaweedfs_master_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/volume_DISK_TWO
+                volume
+                -mserver={{ master_addresses }}
+                -ip={{ bind_ip }}
+                -ip.bind={{ bind_ip }}
+                -port=49501
+                -port.grpc=59501
+                -dataCenter={{ datacenter }}
+                -rack={{ rack }}
+                -disk=hdd
+                -max=0
+                -minFreeSpacePercent=5
+                -dir=/media/DISK_TWO/seaweedfs_volume
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+##
+          - name: 'seaweedfs_volume_DISK_THREE'
+            enabled: true
+            state: "started"
+            Unit:
+              Description: "SeaweedFS volume server (disk: SERIALNUM_HERE)."
+              PartOf: seaweedfs.service
+              Requires: seaweedfs_master_1.service
+              After: seaweedfs_master_1.service
+            Service:
+              Type: simple
+              Restart: always
+              RestartSec: "{{ service_restartsec }}"
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ binary }}
+                -v={{ log_level }}
+                -alsologtostderr={{ log_stderr_bool }}
+                -stderrthreshold={{ log_stderr_threshold }}
+                -logdir={{ logdir }}/volume_DISK_THREE
+                volume
+                -mserver={{ master_addresses }}
+                -ip={{ bind_ip }}
+                -ip.bind={{ bind_ip }}
+                -port=49502
+                -port.grpc=59502
+                -dataCenter={{ datacenter }}
+                -rack={{ rack }}
+                -disk=hdd
+                -max=0
+                -minFreeSpacePercent=5
+                -dir=/media/DISK_THREE/seaweedfs_volume
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+##
+## ==========< Filer metadata backup automation >========== ##
+    - name: 'Filer metadata backup automation'
+      role: "0x0i.systemd"
+      ## https://github.com/0x0I/ansible-role-systemd
+      ## $ ansible-galaxy install 0x0i.systemd
+      ## https://github.com/0x0I/ansible-role-systemd/blob/master/templates/systemd.unit.j2
+      ## https://man7.org/linux/man-pages/man5/systemd.service.5.html
+      ## https://man7.org/linux/man-pages/man5/systemd.exec.5.html
+      ## https://man7.org/linux/man-pages/man7/environ.7.html
+      ignore_errors: "{{ ansible_check_mode }}"
+      tags:
+        units
+        scheduledbackup
+      vars:
+        unit_config:
+          - name: 'seaweedfs_backup_filermeta'
+            ## path: /etc/systemd/system/seaweedfs_backup_filermeta.service
+            enabled: true
+            Unit:
+              Description: "SeaweedFS filermeta backup"
+              Requires: seaweedfs_master_1.service seaweedfs_filer_1.service
+            Service:
+              Type: oneshot
+              User: "{{ user }}"
+              Group: "{{ group }}"
+              WorkingDirectory: "{{ weed_conf_dir }}"
+              ExecStart: >-
+                {{ general_dir }}/scripts/backup-filer-multidest.cronjob.sh
+              LimitNOFILE: 'infinity'
+              LimitNPROC: 'infinity'
+            Install:
+              WantedBy: multi-user.target
+          - name: 'seaweedfs_backup_filermeta'
+            ## path: /etc/systemd/system/seaweedfs_backup_filermeta.timer
+            enabled: true
+            type: timer
+            Unit:
+              Description: "SeaweedFS filermeta backup"
+              Requires: seaweedfs_master_1.service seaweedfs_filer_1.service
+            Timer:
+              OnUnitInactiveSec: 7d # Weekly
+              Unit: seaweedfs_backup_filermeta.service
+            Install:
+              WantedBy: multi-user.target
+## ==========< /Filer metadata backup automation >========== ##
+##
+
+  post_tasks: ## (Run sequentially after roles.)
+    - name: "Ensure services are enabled and started"
+      become: true
+      become_user: root
+      block:
+        - name: "Reload systemd units from disk"
+          ansible.builtin.systemd:
+            daemon_reload: true
+
+        - name: "Restart services"
+          ansible.builtin.service:
+            enabled: true
+            state: restarted
+            name: "{{ item }}"
+          with_items: "{{ service_names }}"
+
+      ignore_errors: "{{ ansible_check_mode }}"
+
+  handlers: # (Run only if triggered by notify directive.)
+    - name: 'restart_postgres'
+      ansible.builtin.service:
+        name: postgresql.service
+        state: restarted
+
+    - name: 'restart_weed'
+      ansible.builtin.service:
+        enabled: true
+        state: restarted
+        name: "{{ item }}"
+      with_items: "{{ service_names }}"

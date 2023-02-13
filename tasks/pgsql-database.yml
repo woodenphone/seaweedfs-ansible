@@ -1,0 +1,119 @@
+## tasks/pgsql-database.yml
+## Setup postgres filer backup stuff
+## Author: Ctrl-S
+## [Fedora]
+---
+#
+## Ensure we have postgres
+- name: '[Fedora] Postgres packages'
+  ansible.builtin.dnf:
+    state: latest
+    name:
+      - postgresql
+      - postgresql-server
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: 'Postgres python adaptor'
+  ansible.builtin.pip:
+    state: latest
+    name: psycopg2-binary
+
+- name: "Find out if PostgreSQL is initialized"
+  ansible.builtin.stat:
+    path: "/var/lib/pgsql/data/pg_hba.conf"
+  register: postgres_data
+
+- name: "Initialize PostgreSQL"
+  ansible.builtin.shell:
+    cmd: "postgresql-setup initdb"
+  when: not postgres_data.stat.exists
+
+- name: "Start and enable services"
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+#
+## Setup weed postgres database and user
+- name: "Create app database"
+  community.postgresql.postgresql_db:
+    state: present
+    name: "{{ pg_database }}"
+  become: true
+  become_user: postgres
+
+- name: "Add comment to filer databse"
+  community.postgresql.postgresql_query:
+  ## https://www.developerfiles.com/adding-and-retrieving-comments-on-postgresql-tables/
+  ## "COMMENT ON TABLE users IS 'This is the table users';"
+  ## https://www.postgresql.org/docs/9.1/sql-comment.html
+    db:  "{{ pg_database }}"
+    query: |
+      COMMENT ON DATABASE "{{ pg_database }}" IS 'Seaweedfs filer metadata store DB';
+  become: true
+  become_user: postgres
+
+- name: "Create db user"
+  community.postgresql.postgresql_user:
+    state: present
+    encrypted: true
+    name: "{{ pg_user }}"
+    password: "{{ pg_password }}"
+  become: true
+  become_user: postgres
+
+- name: "Grant db user access to app db"
+  community.postgresql.postgresql_privs:
+    type: database
+    database: "{{ pg_database }}"
+    roles: "{{ pg_user }}"
+    grant_option: false
+    privs: all
+  become: true
+  become_user: postgres
+
+- name: "Allow md5 connection for the seaweedfs db user"
+  community.postgresql.postgresql_pg_hba:
+    ## $ sudo -upostgres env
+    ## HOME=/var/lib/pgsql
+    dest: "~/data/pg_hba.conf"
+    contype: host
+    databases: all
+    method: md5
+    users: "{{ pg_user }}"
+    create: true
+  become: true
+  become_user: postgres
+  notify: restart_postgres
+
+- name: 'Stash postgres credentials'
+  ansible.builtin.copy:
+    dest: "{{ weed_conf_dir }}/pg-filer-creds.txt"
+    content: |
+      ## {{ weed_conf_dir }}/pg-filer-creds.txt
+      ## Credentials for seaweedfs pgsql filer.
+      pg_database='{{ pg_database }}'
+      pg_user='{{ pg_user }}'
+      pg_password='{{ pg_password }}'
+    mode: "u=rw,g=,o="
+    owner: root
+    group: root
+
+- name: "Create filer table"
+  ## https://www.developerfiles.com/adding-and-retrieving-comments-on-postgresql-tables/
+  ## "COMMENT ON TABLE users IS 'This is the table users';"
+  ## https://www.postgresql.org/docs/9.1/sql-comment.html
+  community.postgresql.postgresql_query:
+    db:  "{{ pg_database }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS "filemeta" (
+        dirhash   BIGINT,
+        name      VARCHAR(65535),
+        directory VARCHAR(65535),
+        meta      bytea,
+        PRIMARY KEY (dirhash, name)
+      );
+      COMMENT ON TABLE filemeta IS 'Seaweedfs filer metadata store table';
+      GRANT ALL ON "filemeta" TO "{{ pg_user }}";
+  become: true
+  become_user: postgres

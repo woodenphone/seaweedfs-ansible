@@ -1,0 +1,30 @@
+## tasks/users.yml
+## Users and groups setup.
+## Author: Ctrl-S
+---
+- name: 'Create seaweedfs group'
+  ansible.builtin.group:
+    state: present
+    gid: "{{ gid }}"
+    name: "{{ group }}"
+
+- name: 'Create seaweedfs user'
+  ansible.builtin.user:
+    state: present
+    user: "{{ user }}"
+    uid: "{{ uid }}"
+    group: "{{ group }}"
+    password: '*' ## Disable login.
+    comment: 'SeaweedFS service user.'
+    create_home: false
+
+- name: 'Add seaweedfs group to permitted users'
+  ansible.builtin.user:
+    ## Append the seaweedfs group to the end of the user's groups list.
+    state: present
+    user: "{{ item }}"
+    groups:
+      - "{{ group }}"
+    append: true
+  with_items: "{{ weed_permitted_users }}"
+  ignore_errors: "{{ ansible_check_mode }}" ## Group might not exist when testing.

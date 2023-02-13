@@ -1,0 +1,140 @@
+## tasks/install_seaweedfs_bin.yml
+## Install weed binary only if appropriate.
+## Author Ctrl-S
+---
+- name: "Prep dir(s)"
+  ansible.builtin.file:
+    state: 'directory'
+    owner: "{{ user }}"
+    group: "{{ group }}"
+    mode: 'u=rwx,g=rwx,o=rx'
+    path: "{{ weed_install_work_dir }}"
+
+## Determining time of last git clone/fetch/pull
+## SEE: https://stackoverflow.com/questions/21170707/git-check-when-the-last-fetch-was-run
+## $ git reflog show --date=iso -n 1 origin/master
+## $ git reflog show --date=unix -n 1 origin/master
+## Alternatively, could check date changed of important internal git files:
+## $ stat .git/HEAD
+## Get the modification time of the most recently modified item of the .git dir in epoch-style timestamp format:
+## $ ls -lAt --time-style=+%s .git/
+## $ ls -lAt --time-style=+@%s .git/ | head -n2 | tail -n1 | cut -d' ' -f7
+## https://docs.ansible.com/ansible/latest/user_guide/playbooks_filters.html
+# - name: 'Check when local repo was last changed'
+#   ansible.builtin.shell:
+#     cmd: ls -lAt --time-style=+@%s .git/ | head -n2 | tail -n1 | cut -d' ' -f7
+#   register: local_repo_changed
+
+# - name: "weed - repo - clone"
+#   ansible.builtin.git:
+#     repo: "https://github.com/chrislusf/seaweedfs.git"
+#     dest: "{{ weed_install_work_dir }}/repo.chrislusf.seaweedfs"
+#     update: true
+#     force: true
+#     track_submodules: true
+#   when:
+#     ## Older than n days:
+#     - ((local_repo_changed  | to_datetime) - (ansible_date_time.epoch  | to_datetime)).days > 2
+#     ## Only interact with github when actually running:
+#     - ansible_check_mode == False
+
+# - name: "weed - bin - find latest"
+#   community.general.github_release: ## Identify latest release number.
+#     ## repo: https://github.com/chrislusf/seaweedfs
+#     ## binary link example: "https://github.com/chrislusf/seaweedfs/releases/download/2.19/linux_amd64_large_disk.tar.gz"
+#     user: 'chrislusf'
+#     repo: 'seaweedfs'
+#     action: latest_release
+#   register: weed_latest_release
+
+- name: 'Check if previously installed binary - check'
+  ansible.builtin.stat:
+    path: "{{ weed_install_work_dir }}/linux_amd64_large_disk-v{{ weed_latest_release }}.tar.gz"
+  register: installed_bin
+
+- name: 'Check if previously installed binary - show'
+  ansible.builtin.debug:
+    var: installed_bin
+
+- name: 'Check if previously downloaded release - check'
+  ansible.builtin.stat:
+    path: "{{ weed_install_work_dir }}/linux_amd64_large_disk-v{{ weed_latest_release }}.tar.gz"
+  register: downloaded_release
+- name: 'Check if previously downloaded release - show'
+  ansible.builtin.debug:
+    var: downloaded_release
+
+- name: 'Decide whether to download weed'
+  ansible.builtin.set_fact:
+    download_weed="{{ ((not downloaded_release.stat.exists) and (not installed_bin.stat.exists)) }}"
+
+- name: 'Does weed need downloading?'
+  ansible.builtin.debug:
+    var: download_weed
+
+  ## Only do download and install if not done previously.
+- name: 'weed - bin - download and install'
+  when: download_weed
+  block:
+    - name: 'weed - bin - download'
+      ansible.builtin.get_url: ## Download latest binary release.
+        url: "https://github.com/chrislusf/seaweedfs/releases/download/{{ weed_latest_release }}/linux_amd64_large_disk.tar.gz"
+        dest: "{{ weed_install_work_dir }}/linux_amd64_large_disk-v{{ weed_latest_release }}.tar.gz"
+        # timeout: 300
+        force: false
+        owner: "{{ user }}"
+        group: "{{ group }}"
+        mode: 'u=rw,g=r,o=r'
+      ignore_errors: "{{ ansible_check_mode }}" ## Dir might not exist when testing.
+      when: "{{ not ansible_check_mode }}" ## Don't hammer github wheile testing.
+
+    - name: 'weed - bin - extract'
+      ansible.builtin.unarchive:
+        remote_src: true
+        src: "{{ weed_install_work_dir }}/linux_amd64_large_disk-v{{ weed_latest_release }}.tar.gz"
+        dest: "{{ weed_install_work_dir }}/"
+      ignore_errors: "{{ ansible_check_mode }}" ## File might not exist when testing.
+
+    - name: 'weed - bin - rename pt1 (copy) '
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ weed_install_work_dir }}/weed"
+        dest: "{{ weed_install_work_dir }}/weed-linux_amd64_large_disk-v{{ weed_latest_release }}"
+        owner: "{{ user }}"
+        group: "{{ group }}"
+        mode: 'u=rwx,g=rx,o=rx'
+      ignore_errors: "{{ ansible_check_mode }}" ## File might not exist when testing.
+    - name: 'weed - bin - rename pt2 (delete origin)'
+      ansible.builtin.file:
+        path: "{{ weed_install_work_dir }}/weed"
+        state: absent
+
+    - name: 'weed - bin - copy to systemwide' ## File might not exist when testing.
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ weed_install_work_dir }}/weed-linux_amd64_large_disk-v{{ weed_latest_release }}"
+        dest: "/usr/local/bin/weed-linux_amd64_large_disk-v{{ weed_latest_release }}"
+        owner: "root"
+        group: "{{ group }}"
+        mode: 'u=rx,g=rx,o=rx'
+      ignore_errors: "{{ ansible_check_mode }}" ## File might not exist when testing.
+
+    - name: 'weed - bin - symlink'
+      ansible.builtin.file:
+        dest: "/usr/local/bin/weed"
+        src: "/usr/local/bin/weed-linux_amd64_large_disk-v{{ weed_latest_release }}"
+        state: link
+      ignore_errors: "{{ ansible_check_mode }}" ## File might not exist when testing.
+
+    - name: 'weed - bin - testrun.1'
+      shell: '/usr/local/bin/weed version'
+      register: weed_install_test_cmd_result
+
+    - name: 'weed - bin - testrun.2'
+      ansible.builtin.debug:
+        var: weed_install_test_cmd_result
+
+    - name: 'weed - bin - testrun.3'
+      assert:
+        that: "'{{ weed_latest_release }}' in weed_install_test_cmd_result.stdout"
+      ignore_errors: "{{ ansible_check_mode }}" # Will fail if command did not run for check mode.

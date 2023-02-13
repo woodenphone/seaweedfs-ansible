@@ -1,0 +1,13 @@
+#!/bin/bash
+## log-cleanup.cronjob.sh
+{{ ansible_managed | comment }}
+
+find -P \
+  {{ logdir | quote }} \
+  -mindepth 1 \
+  -maxdepth 4 \
+  -type f \
+  -cmin '+{{ max_logfile_age_cmin | quote }}' \
+  -name '*.log.*' \
+  -print \
+  -delete

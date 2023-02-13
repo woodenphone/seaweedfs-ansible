@@ -1,0 +1,50 @@
+## tasks/mounts.yml
+## Setup drive mounts.
+## Author: Ctrl-S
+## [Fedora]
+---
+### (1.8T  MODEL  SERIALNUM)
+## sdc  1.8T SERIALNUM  WWN
+- name: 'Directory for mountpoint SN:SERIALNUM'
+  ansible.builtin.file:
+    path: "/media/SERIALNUM"
+    state: 'directory'
+    owner: "root"
+    group: "root"
+    mode: 'u=rwX,g=rwX,o=rX' # 'X' = Set dirs listable.
+
+- name: 'Mount SN:SERIALNUM by WWN'
+  ansible.posix.mount:
+    path: '/media/SERIALNUM'
+    src: 'ID=wwn-REMOVED_REPLACEME'
+    fstype: 'btrfs'
+    boot: true
+    opts: noatime
+    state: mounted
+
+
+### (1.8T  MODEL  SERIALNUM)
+## sdd  1.8T SERIALNUM  WWN
+- name: 'Directory for mountpoint SN:SERIALNUM'
+  ansible.builtin.file:
+    path: "/media/SERIALNUM"
+    state: 'directory'
+    owner: "root"
+    group: "root"
+    mode: 'u=rwX,g=rwX,o=rX' # 'X' = Set dirs listable.
+
+- name: 'Mount SN:SERIALNUM by WWN'
+  ansible.posix.mount:
+    path: '/media/SERIALNUM'
+    src: 'ID=wwn-REMOVED_REPLACEME'
+    fstype: 'btrfs'
+    boot: true
+    opts: noatime
+    state: mounted
+
+
+## == NOTES ==
+## $ df -hT -xdevtmpfs -xtmpfs
+## $ lsblk -o "NAME,FSTYPE,LABEL,SIZE,MODEL,SERIAL,PARTUUID"
+## $ lsblk -o 'NAME,FSTYPE,SIZE,SERIAL,WWN'
+## $ ls -lah /dev/disk/by-id | grep 'wwn-'

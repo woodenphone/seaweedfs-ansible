@@ -1,0 +1,54 @@
+{
+  "identities": [
+    {
+      "name": "anonymous",
+      "actions": [
+        "Read"
+      ]
+    },
+    {
+      "name": "admin",
+      "credentials": [
+        {
+          "accessKey": "admin",
+          "secretKey": "CHANGEME"
+        }
+      ],
+      "actions": [
+        "Admin",
+        "Read",
+        "List",
+        "Tagging",
+        "Write"
+      ]
+    },
+    {
+      "name": "readonly",
+      "credentials": [
+        {
+          "accessKey": "readonly",
+          "secretKey": "CHANGEME"
+        }
+      ],
+      "actions": [
+        "Read",
+        "List"
+      ]
+    },
+    {
+      "name": "torako",
+      "credentials": [
+        {
+          "accessKey": "torako",
+          "secretKey": "CHANGEME"
+        }
+      ],
+      "actions": [
+        "Read",
+        "List",
+        "Tagging",
+        "Write"
+      ]
+    }
+  ]
+}

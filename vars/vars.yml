@@ -1,0 +1,100 @@
+## vars.yml
+---
+## 420 is the "weed number", making it easy to identify seaweedfs stuff at a glance.
+## (User/groupames and IDs chosen to avoid possible collissions, e.g. Drauga1 and other stoner admins.)
+## User and group for everything seaweedfs related that does not require root:
+user: 'seaweedfs' ## System user seaweedfs runs as.
+group: 'seaweedfs' ## System group seaweedfs runs as.
+uid: 420420 ## System UID seaweedfs runs as.
+gid: 420420 ## System GID seaweedfs runs as.
+# Weed dirs
+weed_conf_dir: "/etc/seaweedfs/" ## Dir weed config files go. Doubles as service PWD
+binary: "/usr/local/bin/weed" ## Seaweedfs binary filepath.
+logdir: "/var/log/seaweedfs" ## Base dir weed log files go.
+general_dir: "/var/lib/seaweedfs" ## Dir used for general purpose.
+log_level: '1' ## Higher number is more verbose. Uses glog.
+log_stderr_bool: '0' # -alsologtostderr=FOO - log to standard error as well as files (default true)
+log_stderr_threshold: '2' # -stderrthreshold value - logs at or above this threshold go to stderr
+rack: 'demo-rack' ## Used for prefferential access shit.
+datacenter: 'demo-dc' ## Used for prefferential access shit.
+master_addresses: '127.0.0.1:9333' ## comma-seperated address to master(s) IP:PORT[,IP:PORT]
+filer_address: '127.0.0.1:8888'
+bind_ip: '127.0.0.1' # IP address to bind to
+## Time services should wait before attempting to restart.
+## Systemd.unit RestartSec= 20s
+service_restartsec: 20
+
+## == Install software. ==
+## seaweedfs - install_seaweedfs_bin_conditional.yml
+weed_install_work_dir: "/var/lib/seaweedfs/install_weed"
+weed_latest_release: "3.23"
+## https://github.com/chrislusf/seaweedfs/releases/download/2.69/windows_amd64_large_disk.zip
+## Check for latest version here: https://github.com/chrislusf/seaweedfs/releases/
+
+## certstrap - install_strap_bin.*.yml
+certstrap_install_work_dir: "/var/lib/seaweedfs/install_certstrap"
+certstrap_latest_release: 'v1.2.0'
+## Check for latest version here: https://github.com/square/certstrap/releases
+
+## Users who can use weed shell
+weed_permitted_users:
+  - 'seaweedfs'
+  - 'example-user'
+
+## PostgreSQL
+sys_user: "seaweedfs" ## System account to use to access weed DB.
+sys_group: "seaweedfs" ## System group to use to access weed DB.
+pg_user: "seaweedfs" # Postgresql account to use
+pg_password: "CHANGE-ME" # Postgresql account to use to access weed DB.
+pg_database: "seaweedfs-filer" # Postgresql database to use
+pg_table: "filemeta" ## Postgresql database for filer.
+dump_filepath: "/var/lib/seaweedfs/bkup/filer.sql" ## Filepath to place postgres SQL dump file.
+dump_filepath_gz: "/var/lib/seaweedfs/bkup/filer.sql.gz" ## Filepath to place postgres SQL dump file.
+
+
+
+## Filer backup cronjob
+filer_backup_master: '127.0.0.1:9333' ## Address to master for automated filer backup (-master=foo).
+filer_backup_filer: '127.0.0.1:8888' ## Address to master for automated filer backup (-filer=foo).
+
+## tasks/filer-meta-bkup.yml
+## templates/backup-filer.sh.j2
+filer_backup_filepath: '/media/SOME-DISK/seaweedfs_filermeta_bkup/seaweedfs-filer.filermeta'  ## Filepath to place filer file.
+
+## tasks/filer-meta-bkup-multidest.yml
+## templates/backup-filer-multidest.cronjob.sh.j2
+## Absolute dirpath where filermeta backup should be staged to before being copied to final locations:
+# filermeta_backup_tempdir: '/var/lib/seaweedfs/bkup'
+filermeta_backup_tempfile: '/var/lib/seaweedfs/bkup/seaweedfs-filer.filermeta' # Absolute filepath
+# filermeta_backup_filename: 'seaweedfs-filer.filermeta'
+## Absolute paths to dirs where filermeta backups should be kept
+filermeta_backup_destdirs:
+  - '/media/DISK_ONE/seaweedfs-filer-backup'
+  - '/media/DISK_TWO/seaweedfs-filer-backup'
+  - '/media/DISK_THREE/seaweedfs-filer-backup'
+## Rclone cloud upload
+## --config string Config file (default "$HOME/.config/rclone/rclone.conf")
+rclone_config_filepath: '/etc/seaweedfs/rclone.conf'
+rclone_rc_addr: 127.0.0.1:5420 # To avoid rclone --rc port conflicts. https://rclone.org/rc/#rc-addr-ip
+rclone_bwlimit: '10M' ## https://rclone.org/flags/
+filermeta_backup_rclone_dests: ## as used by $rclone copy /foo/bar/myfile DEST
+  - 'rclone_remote_name:/backup/weed/my_hostname/'
+
+
+
+## Logfile cleanup cronjob
+## tasks/log-cleanup-cronjob.yml
+## templates/log-cleanup.cronjob.sh.j2
+max_logfile_age_cmin: '720' # Cronjob will remove logfiles with modification time older than this.
+log_cleanup_cronjob_special_time: 'daily' # How often to run the cronjob that clears logfiles.
+
+## For: setup-disks.pb.yml
+## Mounts are /media/foo
+disk_ids: ## as found in '/dev/disk/by-id/foo'.
+  - 'ata-VENDOR_MODEL_SERIAL'
+
+## Upgrade-time precautions
+## Path to stash a timestamped file metadata backup on playbook run
+## i.e. writes to: {{onupgrade_bkup_dir}}/upgrade.@{{ansible_facts.date_time.epoch}}.filermeta
+## This is kept until manually removed.
+onupgrade_bkup_dir: "/var/lib/seaweedfs/bkup/"

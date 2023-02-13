@@ -1,0 +1,47 @@
+#!ansible-playbook -vv
+## tasks/mkhelp.yml
+### Generate help docs (informational use only).
+## Author: Ctrl-S
+---
+  - name: 'Make dirs for docs'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rX,g=rX,o=rX' # 'X' = Set dirs listable.
+      path: "{{ item }}"
+    with_items:
+    - "{{ general_dir }}/help-weed"
+    - "{{ general_dir }}/help-certstrap"
+
+##
+### Generate docs for weed
+  - name: 'Copy weed help dumper script'
+    ansible.builtin.copy:
+      src: "scripts/mk-weed-help-msgs.sh"
+      dest: "{{ general_dir }}/mk-weed-help-msgs.sh"
+      mode: "u=rx,g=rx,o=rx"
+      owner: "{{ user }}"
+      group: "{{ group }}"
+    ignore_errors: "{{ ansible_check_mode }}" ## Dir might not exist when testing.
+
+  - name: 'Dump weed help to files'
+    ansible.builtin.shell:
+      cmd: "{{ general_dir }}/mk-weed-help-msgs.sh {{ binary }} {{ general_dir }}/help-weed"
+    ignore_errors: "{{ ansible_check_mode }}" # Will likely fail if binary is absent or script not copied into place.
+
+##
+### Generate docs for certstrap
+  - name: 'Copy certstrap help dumper script'
+    ansible.builtin.copy:
+      src: "scripts/mk-certstrap-help-msgs.sh"
+      dest: "{{ general_dir }}/mk-certstrap-help-msgs.sh"
+      mode: "u=rx,g=rx,o=rx"
+      owner: "{{ user }}"
+      group: "{{ group }}"
+    ignore_errors: "{{ ansible_check_mode }}" ## Dir might not exist when testing.
+
+  - name: 'Dump certstrap help to files'
+    ansible.builtin.shell:
+      cmd: "{{ general_dir }}/mk-certstrap-help-msgs.sh /usr/local/bin/certstrap {{ general_dir }}/help-certstrap"
+    ignore_errors: "{{ ansible_check_mode }}" # Will likely fail if binary is absent or script not copied into place

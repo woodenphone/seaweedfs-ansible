@@ -1,0 +1,68 @@
+## tasks/pgsql-backup.yml
+## Setup automated backup of the seaweedfs filer postgres database.
+## Author: Ctrl-S
+## [Fedora]
+---
+- name: 'Install: cronjob - pgsql filermeta backup'
+  when: uninstall is not defined
+  block:
+  - name: 'Directory for backup script'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ sys_user }}"
+      group: "{{ sys_group }}"
+      mode: 'u=rX,g=rX,o=rX' # 'X' = Set dirs listable.
+      path: "{{ general_dir }}/scripts/"
+
+  - name: 'Template db dumper scripts'
+    ansible.builtin.template:
+      src: "templates/{{ item }}.j2"
+      dest: "{{ general_dir }}/scripts/{{ item }}"
+      mode: "u=rx,g=rx,o=r"
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      backup: true
+    with_items:
+      - 'dump_pg_filer_sql.cronjob.sh'
+      - 'dump_pg_filer_sqlgz.cronjob.sh'
+
+  - name: 'Dir(s) for backup files to be stored'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ sys_user }}"
+      group: "{{ sys_group }}"
+      mode: 'u=rwX' # 'X' = Set dirs listable.
+      path: "{{ item }}"
+    with_items:
+      - "{{ dump_filepath | dirname }}"
+      - "{{ dump_filepath_gz | dirname }}"
+
+  - name: 'Cronjob to run backup script'
+    ansible.builtin.cron:
+      state: present
+      name: 'backup seaweedfs filer postgres DB'
+      cron_file: 'pg-weed-bkup'
+      user: "{{ sys_user }}"
+      special_time: weekly
+      job: "{{ general_dir }}/scripts/dump_pg_filer_sql.cronjob.sh"
+
+
+- name: 'Uninstall: cronjob - pgsql filermeta backup'
+  when: uninstall is defined and uninstall
+  ## Allow both install and uninstall from same script.
+  ## https://dev.to/admantium/ansible-idempotent-playbooks-4e67
+  block:
+  - name: 'Scripts absent'
+    ansible.builtin.file:
+      state: absent
+      path: "{{ item }}"
+    with_items:
+      - "{{ general_dir }}/scripts/dump_pg_filer_sql.cronjob.sh"
+      - "{{ general_dir }}/scripts/dump_pg_filer_sqlgz.cronjob.sh"
+      - "{{ general_dir }}/scripts/backup-filer-multidest.cronjob.sh"
+
+  - name: 'Cronjob absent'
+    ansible.builtin.cron:
+      state: absent
+      name: 'backup seaweedfs filer postgres DB'
+      cron_file: 'pg-weed-bkup'

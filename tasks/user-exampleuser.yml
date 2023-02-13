@@ -1,0 +1,58 @@
+## tasks/user-exampleuser.yml
+## User account: exampleuser
+---
+- name: 'System user: exampleuser'
+  ansible.builtin.user:
+    state: present
+    user: "exampleuser"
+    # uid: "2001"
+    password_lock: false
+    password: "{{ 'default_password_for_example' | password_hash('sha512') }}"
+    update_password: on_create
+    generate_ssh_key: true
+    ssh_key_bits: 4092
+    ssh_key_type: 'rsa'
+    ssh_key_comment: "exampleuser@{{ ansible_facts['nodename'] }} (generated on {{ ansible_facts.date_time.date }} by ansible)"
+    shell: '/usr/bin/bash'
+    append: true
+    groups:
+      - wheel # Sudo for Fedora-like.
+  # ignore_errors: ansible_facts['ansible_user'] == 'exampleuser' # Can't edit your own user account.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: 'authorized_keys: exampleuser'
+  ansible.builtin.authorized_key:
+    user: "exampleuser"
+    key: "{{ item }}"
+    state: present
+  with_items:
+    - "{{ lookup('file', 'files/pubkeys/exampleuser.pub') }}" # exampleuser's main SSH pubkey.
+    # - "{{ lookup('file', 'files/pubkeys/exampleuser-2.pub') }}" # exampleuser's secondary SSH pubkey.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# - name: 'bashrc: exampleuser'
+#   ansible.builtin.copy:
+#     src: "files/home/bashrc.sh"
+#     dest: "/home/exampleuser/.bashrc"
+#     owner: "exampleuser"
+#     group: "exampleuser"
+#     mode: "u=rwx,g=rx,o="
+#     backup: true
+
+# - name: 'bash_aliases: exampleuser'
+#   ansible.builtin.copy:
+#     src: "files/home/bash_aliases.sh"
+#     dest: "/home/exampleuser/.bash_aliases"
+#     owner: "exampleuser"
+#     group: "exampleuser"
+#     mode: "u=rwx,g=rx,o="
+#     backup: true
+
+# - name: '$HOME/bin scripts for exampleuser'
+#   ansible.builtin.copy: # Place to put my custom scripts.
+#     src: "files/home-bin/"
+#     dest: "/home/exampleuser/bin/"
+#     owner: "exampleuser"
+#     group: "exampleuser"
+#     mode: "u=rwx,g=rx,o="
+#     backup: false

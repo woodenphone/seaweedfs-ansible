@@ -1,0 +1,57 @@
+#!ansible-playbook -vv
+## manual-binaries.pb.yml
+## Pre-install binaries so config + certificate generation can be done before install.
+## Author: Ctrl-S
+---
+- name: 'manual-binaries'
+  hosts: 'localhost'
+  become: true
+  vars_files:
+  - 'vars/vars.yml'
+  tasks:
+  - name: 'User & group for seaweedfs'
+    ansible.builtin.include_tasks:
+      file: 'tasks/users.yml'
+
+  - name: 'Seaweedfs config dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=rX,o=' # Weed group needs read to use weed CLI utils.
+      path: "{{ item }}"
+    with_items:
+      - "{{weed_conf_dir}}"
+
+  - name: 'Seaweedfs misc dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rX,g=rX,o=rX' # 'X' = Set dirs listable.
+      path: "{{ item }}"
+    with_items:
+      - "{{ general_dir }}"
+      - "{{ general_dir }}/scripts"
+
+  - name: 'Seaweedfs log dirs exist'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g=rX,o=rX' # Modified by root and seaweedfs only.
+      path: "{{ item }}"
+    with_items:
+      - "{{logdir}}"
+
+  - name: 'Install seaweedfs executable'
+    ansible.builtin.include_tasks:
+      file: 'tasks/install_seaweedfs_bin.yml'
+
+  - name: 'Install certstrap executable'
+    ansible.builtin.include_tasks:
+      file: 'install_certstrap_bin.tasks.yml'
+
+  - name: 'Generate help docs for weed and certstrap (informational use only)'
+    ansible.builtin.include_tasks:
+      file: 'mkhelp.tasks.yml'

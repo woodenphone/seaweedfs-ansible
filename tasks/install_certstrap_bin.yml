@@ -1,0 +1,90 @@
+## tasks/install_certstrap_bin.yml
+## Install certstrap binary only if appropriate.
+---
+- name: "Prep dir(s)"
+  ansible.builtin.file:
+    state: 'directory'
+    owner: "{{ user }}"
+    group: "{{ group }}"
+    mode: 'u=rx,g=rx,o=rx'
+    path: "{{ certstrap_install_work_dir }}"
+
+# ## https://github.com/square/certstrap
+# - name: "certstrap - repo - clone"
+#   ansible.builtin.git:
+#     repo: "https://github.com/square/certstrap.git"
+#     dest: "{{ certstrap_install_work_dir }}/repos/square.certstrap"
+
+# - name: "certstrap - bin - find latest"
+#   community.general.github_release: ## Identify latest release number.
+#     ## repo:
+#     ## binary link example:
+#     user: 'square'
+#     repo: 'certstrap'
+#     action: latest_release
+#   register: certstrap_latest_release
+
+- name: "string manipulation - filename"
+  set_fact:
+    certstrap_filename: "certstrap-{{ certstrap_latest_release[1:] }}-linux-amd64"
+
+- name: 'Check if previously installed binary - check'
+  ansible.builtin.stat:
+    path: "/usr/local/bin/{{ certstrap_filename }}"
+  register: installed_bin
+- name: 'Check if previously downloaded release - check'
+  ansible.builtin.stat:
+    path: "{{ certstrap_install_work_dir }}/{{ certstrap_filename }}"
+  register: downloaded_release
+
+- name: 'Decide whether to download certstrap'
+  ansible.builtin.set_fact:
+    download_certstrap="{{ ((not downloaded_release.stat.exists) and (not installed_bin.stat.exists)) }}"
+
+- name: 'Does certstrap need downloading?'
+  ansible.builtin.debug:
+    var: download_certstrap
+
+
+  ## Only do download and install if not done previously.
+- name: 'certstrap - bin - download and install'
+  when: download_certstrap
+  block:
+    - name: "certstrap - bin - download"
+      ansible.builtin.get_url: ## Download latest binary release.
+        ## https://github.com/square/certstrap/releases/download/v1.2.0/certstrap-1.2.0-linux-amd64
+        url: "https://github.com/square/certstrap/releases/download/{{ certstrap_latest_release }}/{{ certstrap_filename }}"
+        dest: "{{ certstrap_install_work_dir }}/{{ certstrap_filename }}"
+        # timeout: 300
+        force: false
+        owner: "root"
+        group: "{{ group }}"
+        mode: 'u=r,g=r,o=r'
+
+    - name: "certstrap - bin - copy to systemwide"
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ certstrap_install_work_dir }}/{{ certstrap_filename }}"
+        dest: "/usr/local/bin/{{ certstrap_filename }}"
+        owner: "root"
+        group: "{{ group }}"
+        mode: 'u=r,g=rx,o=rx'
+
+    - name: "certstrap - bin - symlink"
+      ansible.builtin.file:
+        dest: "/usr/local/bin/certstrap"
+        src: "{{ certstrap_filename }}"
+        state: link
+
+    - name: "certstrap - bin - testrun.1"
+      shell: '/usr/local/bin/certstrap --version'
+      register: certstrap_install_test_cmd_result
+    - name: "certstrap - bin - testrun.2"
+      ansible.builtin.debug:
+        var: certstrap_install_test_cmd_result
+        ## Expected: "stdout": "certstrap version 1.2.0"
+    - name: "certstrap - bin - testrun.3"
+      assert:
+        that: "'{{ certstrap_latest_release[1:] }}' in certstrap_install_test_cmd_result.stdout"
+        ## ex: 'v1.2.0'[1:] == '1.2.0'
+      ignore_errors: "{{ ansible_check_mode }}" # Will fail if command did not run for check mode.

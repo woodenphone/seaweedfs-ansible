@@ -1,0 +1,5 @@
+## ~/.s3cfg-weed
+## Config file for s3cmd.
+## See: https://github.com/s3tools/s3cmd
+## See: https://s3tools.org/kb/item14.htm
+## See: https://github.com/s3tools/s3cmd/blob/master/S3/Config.py

@@ -1,0 +1,38 @@
+#!ansible-playbook -vv
+## setup-disks.ata-DISK_UNIQUE_ID_HERE.pb.yml
+## Setup one disk and its mount.
+## A single disk is done at a time to limit damage from any given bug.
+## Author: Ctrl-S
+---
+- name: 'Setup disks and mounts by ID'
+  hosts: 'localhost'
+  become: true
+  vars:
+    disk_id: 'ata-VENDOR_MODEL_SERIAL'
+  tasks:
+  - name: "Disk partition for{{ disk_id }}"
+    community.general.parted:
+      state: present
+      device: '/dev/disk/by-id/{{ disk_id }}'
+      number: 1
+      label: gpt
+      part_type: primary
+      fs_type: btrfs
+
+  - name: "Mountpoint dir for {{ disk_id }}"
+    ansible.builtin.file:
+      path: "/media/{{ disk_id }}"
+      state: 'directory'
+      owner: "root"
+      group: "root"
+      mode: 'u=rwX,g=rwX,o=rX' # 'X' = Set dirs listable.
+
+  - name: "Mount for {{ disk_id }}"
+    ansible.posix.mount:
+      path: '/media/{{ disk_id }}'
+      src: "ID={{ disk_id }}"
+      fstype: 'btrfs'
+      boot: true # Mount at startup
+      opts: noatime
+      state: mounted # Create if absent & mount if unmounted.
+      backup: true

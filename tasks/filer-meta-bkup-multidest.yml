@@ -1,0 +1,83 @@
+## tasks/filer-meta-bkup-multidest.yml
+## Automated backup of the seaweedfs filer.
+## Author: Ctrl-S
+## [Fedora]
+---
+- name: 'Install: cronjob - filermeta backup'
+  when: uninstall is not defined
+  block:
+  - name: 'Directory for backup staging present'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX,g+rX' # 'X' = Set dirs listable.
+      path: "{{ filermeta_backup_tempfile | dirname }}"
+
+  - name: 'Directories for backup to be copied to present'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX' ## Only seaweedfs itself ever accesses these.
+      path: "{{ item }}"
+    with_items: "{{ filermeta_backup_destdirs }}"
+
+  - name: 'Directory for script to be stored present'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rX,g=rX' # Only modified by root/sudoers.
+      path: "{{ general_dir }}/scripts/"
+
+  - name: 'Template filer backup script'
+    ansible.builtin.template:
+      src: "templates/backup-filer-multidest.cronjob.sh.j2"
+      dest: "{{ general_dir }}/scripts/backup-filer-multidest.cronjob.sh"
+      mode: "u=rx,g=r,o=r" # Nothing secret in this file, autoexecuted by cronjob.
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      backup: true
+
+  - name: 'Rclone conf file dir present'
+    ansible.builtin.file:
+      state: 'directory'
+      owner: "{{ user }}"
+      group: "{{ group }}"
+      mode: 'u=rwX'
+      path: "{{ rclone_config_filepath | dirname }}"
+
+  - name: 'Rclone conf file present'
+    ansible.builtin.copy:
+      src: "files/rclone.conf"
+      dest: "{{ rclone_config_filepath }}"
+      mode: "u=rw,g=r,o=" # File contains secrets.
+      owner: "{{ user }}"
+      group: "{{ group }}"
+
+  - name: 'Cronjob for filer backup script present'
+    ansible.builtin.cron:
+      state: present
+      name: 'backup seaweedfs filer multidest'
+      cron_file: 'weed-filer-bkup'
+      user: "{{ user }}"
+      special_time: weekly
+      job: "{{ general_dir }}/scripts/backup-filer-multidest.cronjob.sh"
+
+
+- name: 'Uninstall: cronjob - filermeta backup'
+  when: uninstall is defined and uninstall
+  ## Allow both install and uninstall from same script.
+  ## https://dev.to/admantium/ansible-idempotent-playbooks-4e67
+  block:
+  - name: 'Script absent'
+    ansible.builtin.file:
+      state: absent
+      path: "{{ general_dir }}/scripts/backup-filer-multidest.cronjob.sh"
+
+  - name: 'Cronjob absent'
+    ansible.builtin.cron:
+      state: absent
+      name: 'backup seaweedfs filer multidest'
+      cron_file: 'weed-filer-bkup'

@@ -1,0 +1,31 @@
+## tasks/logrotate.yml
+## Setup automated management of seaweedfs logs via logroate.
+## Author: Ctrl-S
+## [Fedora]
+---
+- name: 'Dir exists: /etc/logrotate.d/'
+  ansible.builtin.file:
+    state: 'directory'
+    path: "/etc/logrotate.d"
+    mode: "u=rwX,g=rX,o=rX" # 'X' = Set dirs listable.
+    owner: "root"
+    group: "root"
+
+# - name: 'Logrotate config file copied'
+#   ansible.builtin.copy:
+#     src: "files/logrotate-seaweedfs.conf"
+#     dest: "/etc/logrotate.d/seaweedfs"
+#     mode: "u=rw,g=r,o=r"
+#     owner: "root"
+#     group: "root"
+#   ignore_errors: "{{ ansible_check_mode }}" ## Dir might not exist when testing.
+
+- name: 'Logrotate config file templated'
+  ansible.builtin.template:
+    src: "templates/seaweedfs.logrotate.j2"
+    dest: "/etc/logrotate.d/seaweedfs"
+    mode: "u=rwx,g=rx,o=r"
+    owner: "root"
+    group: "root"
+    backup: true
+  ignore_errors: "{{ ansible_check_mode }}" ## Dir might not exist when testing.

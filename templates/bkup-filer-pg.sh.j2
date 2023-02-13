@@ -1,0 +1,4 @@
+#!/bin/bash
+## bkup-filer-pg.sh
+## pg_dump --format=plain seaweedfs-filer > /var/lib/seaweedfs/bkup/bkup-filer-pg.sql
+pg_dump --format=plain {{ pg_database | quote }} | gzip > {{ dump_filepath_gz | quote }}

@@ -1,0 +1,97 @@
+#!ansible-playbook -vv
+## sshd.tasks.yml
+## Setup SSH and SSHD.
+---
+## == SSH ==
+- name: 'Install packages - ssh'
+  ansible.builtin.package:
+    state: present
+    name:
+      - openssh
+      - openssh-server
+      - openssh-clients
+      ## https://packages.fedoraproject.org/pkgs/openssh/openssh/
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: 'Install packages - ssh'
+  ansible.builtin.package:
+    state: present
+    name:
+      - ssh
+      ## https://packages.debian.org/buster/ssh
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: 'Enable and start sshd'
+  ansible.builtin.service:
+    name: sshd
+    state: started
+    enabled: true
+
+- name: 'Backup SSHD config file'
+  ansible.builtin.copy:
+    remote_src: true
+    src: "/etc/ssh/sshd_config"
+    dest: "/etc/ssh/sshd_config.backup"
+    owner: 'root'
+    group: 'root'
+    mode: 'u=rw,g=,o='
+    backup: true
+
+- name: 'Configure sshd'
+  block:
+    - name: 'Root login via pubkey only'
+      ansible.builtin.lineinfile:
+        path: "/etc/ssh/sshd_config"
+        regexp: "^PermitRootLogin"
+        line: "PermitRootLogin prohibit-password"
+        validate: '/usr/sbin/sshd -T -f %s'
+
+    - name: 'Pubkey login enabled'
+      ansible.builtin.lineinfile:
+        path: "/etc/ssh/sshd_config"
+        regexp: "^PubkeyAuthentication"
+        line: "PubkeyAuthentication yes"
+        validate: '/usr/sbin/sshd -T -f %s'
+
+    - name: 'Password login disabled'
+      ansible.builtin.lineinfile:
+        path: "/etc/ssh/sshd_config"
+        regexp: "^PasswordAuthentication"
+        line: "PasswordAuthentication no"
+        validate: '/usr/sbin/sshd -T -f %s'
+
+    - name: 'SSH port set'
+      ansible.builtin.lineinfile:
+        path: "/etc/ssh/sshd_config"
+        regexp: "^Port"
+        line: "Port 22"
+        validate: '/usr/sbin/sshd -T -f %s'
+
+    # - name: 'PAM login enabled (for smartcards e.g. FIDO/U2F)'
+    #   ansible.builtin.lineinfile:
+    #     path: "/etc/ssh/sshd_config"
+    #     regexp: "^UsePAM"
+    #     line: "UsePAM yes"
+    #     validate: '/usr/sbin/sshd -T -f %s'
+    #     backup: yes
+
+    - name: 'SSH includes enabled'
+      ansible.builtin.lineinfile:
+        path: "/etc/ssh/sshd_config"
+        line: "Include /etc/ssh/sshd_config.d/*.conf"
+        validate: '/usr/sbin/sshd -T -f %s'
+
+    # - name: 'Allow older SSH algorithm to allow WinSCP to connect'
+    #   ## See: https://winscp.net/tracker/1952
+    #   ansible.builtin.copy:
+    #     path: "/etc/ssh/sshd_config.d/allowOldAlgoSshrsa.conf"
+    #     content: |
+    #       ## Allow older SSH algorithm to allow WinSCP to connect
+    #       PubkeyAcceptedAlgorithms +ssh-rsa
+
+    - name: 'Allow older SSH algorithm to allow WinSCP to connect'
+      ## See: https://winscp.net/tracker/1952
+      ansible.builtin.lineinfile:
+        path: "/etc/ssh/sshd_config"
+        line: "PubkeyAcceptedAlgorithms +ssh-rsa"
+        validate: '/usr/sbin/sshd -T -f %s'

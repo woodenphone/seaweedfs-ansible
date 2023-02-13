@@ -1,0 +1,102 @@
+#!/bin/bash
+## backup-filer-multidest.cronjob.sh
+## From templates/backup-filer-multidest.cronjob.sh.j2
+{{ ansible_managed | comment }}
+
+## == <functions> ==
+function myecho() {
+  ## echo with suffix and prefix to STDERR
+  echo "##[${0##*/}]" ${@}
+}
+function myechod() {
+  ## echo with suffix and prefix to STDERR
+  echo "##[${0##*/}]" ${@} "at $(date '+(%Y-%m-%dt%H:%M%S%z @%s)')"
+}
+## == </functions> ==
+
+
+## == <welcome message> ==
+myechod "Starting"
+myecho "USER=$USER"
+myecho "hostname:$(hostname)"
+## == </welcome message> ==
+
+
+## == <dump filer> ==
+myecho "Dumping filermeta to staging location" "{{ filermeta_backup_tempfile }}"
+
+## Ensure dump path is unused
+rm -vf {{ filermeta_backup_tempfile }}
+
+## Create new filer backup
+echo "fs.meta.save -o {{ filermeta_backup_tempfile }}" | weed shell -master={{filer_backup_master | quote }} -filer={{filer_backup_filer | quote }}
+
+## Show filer dump worked
+ls -nQF {{ filermeta_backup_tempfile }}
+## == </dump filer> ==
+
+
+## == <local disks> ==
+{{ filermeta_backup_destdirs | to_nice_json(indent=2) | comment }}
+{# Require a list, treat any other datatype as "disable this section". #}
+{% if ( ( filermeta_backup_destdirs | type_debug )  ==  "list" ) %}
+  myechod "Copying backup to volume HDDs"
+  {% for destdir in filermeta_backup_destdirs %}
+
+    ## * * * * * * * * * *
+    ## destdir: {{ destdir }}
+    bkup_dest="{{ destdir }}/{{ filermeta_backup_tempfile | basename }}"
+    myecho "bkup_dest=$bkup_dest"
+    myechod "Updating backups in {{ destdir }}"
+    ## Retain 3 previous versions (by renaming old version)
+    rm -vf "${bkup_dest}.old3"
+    mv -v "${bkup_dest}.old2" "${bkup_dest}.old3"
+    mv -v "${bkup_dest}.old" "${bkup_dest}.old2"
+    mv -v "${bkup_dest}" "${bkup_dest}.old"
+    cp -v "{{ filermeta_backup_tempfile }}" "${bkup_dest}"
+    ## Show backup versions
+    ls -nQF "{{ destdir }}"
+    myecho "Finished updating backups in" "{{ destdir }}"
+
+  {% endfor %}
+  myechod "Done copying backup to volume HDDs"
+{% endif %}
+## == </local disks> ==
+
+
+## == <rclone remotes> ==
+{{ filermeta_backup_rclone_dests | to_nice_json(indent=2) | comment }}
+{# Require a list, treat any other datatype as "disable this section". #}
+{% if ( ( filermeta_backup_rclone_dests | type_debug )  ==  "list" ) %}
+  myechod "Copying backup to cloud dests"
+  {% for rclone_dest in filermeta_backup_rclone_dests %}
+
+    ## * * * * * * * * * *
+    ## rclone_dest: {{ rclone_dest }}
+    myecho "Uploading to" "{{ rclone_dest }}"
+    ## See:  https://rclone.org/flags/
+    ## --rc is required to allow changing settings mid-run e.g. bwlimit
+    rclone --rc --rc-addr={{ rclone_rc_addr | quote }} \
+      --config={{ rclone_config_filepath | quote }} \
+      --bwlimit={{ rclone_bwlimit | quote }} \
+      --checksum \
+      copy \
+      "{{ filermeta_backup_tempfile }}" \
+      {{ rclone_dest | quote }}
+
+    myechod "Listing files in" "{{ rclone_dest }}"
+    rclone --config={{ rclone_config_filepath | quote }} lsf -F'tsp' {{ rclone_dest | quote }}
+
+  {% endfor %}
+  myecho "Done copying backup to cloud dests"
+{% endif %}
+## == </rclone remotes> ==
+
+## == <cleanup> ==
+myecho "Removing tempfile now that all dests are serviced"
+## Free space on drive used for staging
+rm -vf "{{ filermeta_backup_tempfile }}"
+## == </cleanup> ==
+
+## Show script ran to the end of file
+myechod "Finished"

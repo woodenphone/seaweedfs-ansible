@@ -1,0 +1,19 @@
+#!/bin/bash
+## backup-filer.cronjob.sh
+{{ ansible_managed | comment }}
+
+
+echo "##[${0##*/}]" "Starting" "(at date=$(date) epoch=$(date +%s))" >&2
+
+## Define destination
+dest_path='{{filer_backup_filepath}}'
+echo "##[${0##*/}]" "dest_path=$dest_path" >&2
+
+## Retain one previous version
+rm -vrf "${dest_path}.old" # Remove old version to be replaced.
+mv -v "${dest_path}" "${dest_path}.old" # Retain one past version.
+
+## Create new filer backup
+echo "fs.meta.save -o ${dest_path}" | weed shell -master={{filer_backup_master | quote }} -filer={{filer_backup_filer | quote }}
+
+echo "##[${0##*/}]" "Finished" "(at date=$(date) epoch=$(date +%s))" >&2

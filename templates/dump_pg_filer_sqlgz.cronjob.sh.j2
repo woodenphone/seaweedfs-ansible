@@ -1,0 +1,12 @@
+#!/bin/bash
+## dump_pg_filer_sqlgz.cronjob.sh
+## Dump seaweedfs filer DB to a gzipped SQL file.
+{{ ansible_managed | comment }}
+
+pg_dump \
+  --format=plain \
+  --quote-all-identifiers \
+  --encoding=UTF8 \
+  --create \
+  --dbname={{ pg_database | quote  }} \
+  | gzip > {{ dump_filepath_gz | quote  }}

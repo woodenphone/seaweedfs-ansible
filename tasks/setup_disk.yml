@@ -1,0 +1,31 @@
+## tasks/setup_disk.yml
+## Setup one disk, given its /dev/disks/by-id name.
+## Author: Ctrl-S
+## [Fedora]
+---
+- name: "Disk partition for {{ item }}"
+  community.general.parted:
+    state: present
+    device: '/dev/disk/by-id/{{ item }}'
+    number: 1
+    label: gpt
+    part_type: primary
+    fs_type: btrfs
+
+- name: "Mountpoint dir for {{ item }}"
+  ansible.builtin.file:
+    path: "/media/{{ item }}"
+    state: 'directory'
+    owner: "root"
+    group: "root"
+    mode: 'u=rwX,g=rwX,o=rX' # 'X' = Set dirs listable.
+
+- name: "Mount for {{ item }}"
+  ansible.posix.mount:
+    path: '/media/{{ item }}'
+    src: "ID={{ item }}"
+    fstype: 'btrfs'
+    boot: true # Mount at startup
+    opts: noatime
+    state: mounted # Create if absent, mount if unmounted.
+    backup: true

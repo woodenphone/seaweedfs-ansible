@@ -1,0 +1,54 @@
+{
+  "identities": [
+    {
+      "name": "anonymous",
+      "actions": [
+        "Read"
+      ]
+    },
+    {
+      "name": "admin",
+      "credentials": [
+        {
+          "accessKey": "{{ s3json_admin_access_key }}",
+          "secretKey": "{{ s3json_admin_secret_key }}"
+        }
+      ],
+      "actions": [
+        "Admin",
+        "Read",
+        "List",
+        "Tagging",
+        "Write"
+      ]
+    },
+    {
+      "name": "readonly",
+      "credentials": [
+        {
+          "accessKey": "{{ s3json_readonly_access_key }}",
+          "secretKey": "{{ s3json_readonly_secret_key }}"
+        }
+      ],
+      "actions": [
+        "Read",
+        "List"
+      ]
+    },
+    {
+      "name": "torako",
+      "credentials": [
+        {
+          "accessKey": "{{ s3json_torako_access_key }}",
+          "secretKey": "{{ s3json_torako_secret_key }}"
+        }
+      ],
+      "actions": [
+        "Read",
+        "List",
+        "Tagging",
+        "Write"
+      ]
+    }
+  ]
+}
